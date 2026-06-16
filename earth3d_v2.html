@@ -1,0 +1,705 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Earth — Live Explorer</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;600;700&family=Orbitron:wght@400;700;900&display=swap');
+*{margin:0;padding:0;box-sizing:border-box;}
+:root{--void:#00000f;--cyan:#00d4ff;--aurora:#7b2fff;--star:#fff;}
+html{scroll-behavior:smooth;}
+body{background:var(--void);color:var(--star);font-family:'Space Grotesk',sans-serif;overflow-x:hidden;cursor:none;}
+
+#cursor{position:fixed;width:14px;height:14px;background:var(--cyan);border-radius:50%;pointer-events:none;z-index:9999;transform:translate(-50%,-50%);box-shadow:0 0 20px var(--cyan),0 0 40px rgba(0,212,255,.4);transition:width .2s,height .2s,background .2s;}
+#cursor-ring{position:fixed;width:44px;height:44px;border:1px solid rgba(0,212,255,.45);border-radius:50%;pointer-events:none;z-index:9998;transform:translate(-50%,-50%);}
+body.zooming #cursor{background:#ff9500;box-shadow:0 0 20px #ff9500;width:20px;height:20px;}
+body.zooming #cursor-ring{border-color:rgba(255,149,0,.6);width:60px;height:60px;}
+
+#canvas-container{position:fixed;top:0;left:0;width:100%;height:100%;z-index:0;}
+canvas{display:block;}
+#particle-canvas{position:fixed;top:0;left:0;width:100%;height:100%;pointer-events:none;z-index:3;}
+#scanlines{position:fixed;top:0;left:0;width:100%;height:100%;background:repeating-linear-gradient(0deg,transparent,transparent 2px,rgba(0,0,0,.025) 2px,rgba(0,0,0,.025) 4px);pointer-events:none;z-index:6;opacity:.4;}
+
+/* scroll ui */
+#scroll-container{position:relative;z-index:10;pointer-events:none;}
+.section{height:100vh;display:flex;align-items:center;justify-content:center;position:relative;pointer-events:none;}
+#hero{flex-direction:column;text-align:center;}
+.eyebrow{font-family:'Orbitron',monospace;font-size:.65rem;letter-spacing:.4em;color:var(--cyan);text-transform:uppercase;margin-bottom:1.5rem;opacity:0;animation:fadeUp 1s .3s forwards;}
+h1.main{font-family:'Orbitron',monospace;font-size:clamp(3rem,8vw,7rem);font-weight:900;line-height:.95;letter-spacing:-.02em;background:linear-gradient(135deg,#fff 0%,var(--cyan) 50%,var(--aurora) 100%);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;opacity:0;animation:fadeUp 1s .5s forwards;}
+.subtitle{font-size:clamp(.9rem,2vw,1.1rem);color:rgba(255,255,255,.5);font-weight:300;margin-top:1.5rem;letter-spacing:.05em;opacity:0;animation:fadeUp 1s .8s forwards;}
+.scroll-hint{position:absolute;bottom:2.5rem;left:50%;transform:translateX(-50%);display:flex;flex-direction:column;align-items:center;gap:.5rem;opacity:0;animation:fadeUp 1s 1.2s forwards;}
+.scroll-hint span{font-family:'Orbitron',monospace;font-size:.6rem;letter-spacing:.3em;color:rgba(255,255,255,.3);}
+.scroll-line{width:1px;height:50px;background:linear-gradient(to bottom,var(--cyan),transparent);animation:scrollPulse 2s ease-in-out infinite;}
+
+/* click hint */
+#click-hint{position:fixed;bottom:2.5rem;left:50%;transform:translateX(-50%);font-family:'Orbitron',monospace;font-size:.6rem;letter-spacing:.3em;color:rgba(0,212,255,.5);pointer-events:none;z-index:20;opacity:0;transition:opacity .6s;text-align:center;}
+#click-hint.show{opacity:1;}
+
+/* zoom overlay */
+#zoom-overlay{position:fixed;top:0;left:0;width:100%;height:100%;pointer-events:none;z-index:15;opacity:0;transition:opacity .4s;}
+#zoom-overlay.show{opacity:1;}
+#zoom-close{position:fixed;top:1.5rem;right:2rem;font-family:'Orbitron',monospace;font-size:.65rem;letter-spacing:.3em;color:var(--cyan);z-index:30;cursor:pointer;pointer-events:auto;opacity:0;transition:opacity .4s;display:none;}
+#zoom-close.show{opacity:1;display:block;}
+#zoom-region-label{position:fixed;top:1.5rem;left:50%;transform:translateX(-50%);font-family:'Orbitron',monospace;font-size:.8rem;letter-spacing:.35em;color:var(--cyan);text-shadow:0 0 20px var(--cyan);z-index:30;pointer-events:none;opacity:0;transition:opacity .4s;text-align:center;}
+#zoom-region-label.show{opacity:1;}
+
+/* fact popup */
+#fact-popup{position:fixed;left:50%;bottom:5rem;transform:translateX(-50%);background:rgba(0,10,30,.85);border:1px solid rgba(0,212,255,.25);border-radius:14px;padding:1.4rem 2rem;backdrop-filter:blur(24px);max-width:420px;width:90%;z-index:25;pointer-events:none;opacity:0;transition:opacity .5s,transform .5s;transform:translateX(-50%) translateY(20px);}
+#fact-popup.show{opacity:1;transform:translateX(-50%) translateY(0);}
+#fact-popup .fact-tag{font-family:'Orbitron',monospace;font-size:.55rem;letter-spacing:.35em;color:var(--cyan);margin-bottom:.6rem;}
+#fact-popup .fact-text{font-size:.95rem;color:rgba(255,255,255,.85);line-height:1.7;font-weight:300;}
+#fact-popup .fact-source{font-size:.7rem;color:rgba(255,255,255,.3);margin-top:.6rem;font-style:italic;}
+
+/* explosion canvas */
+#exp-canvas{position:fixed;top:0;left:0;width:100%;height:100%;pointer-events:none;z-index:22;}
+
+/* event labels */
+.event-label{position:fixed;font-family:'Orbitron',monospace;pointer-events:none;z-index:20;opacity:0;transition:opacity .5s;}
+.event-label.top-left{top:12%;left:5%;}
+.event-label.top-right{top:15%;right:5%;text-align:right;}
+.event-label.bottom-left{bottom:20%;left:5%;}
+.event-label.bottom-right{bottom:15%;right:5%;text-align:right;}
+.event-label .label-title{font-size:clamp(1.1rem,2.5vw,1.8rem);font-weight:700;color:var(--cyan);text-shadow:0 0 30px var(--cyan);}
+.event-label .label-sub{font-size:.6rem;letter-spacing:.25em;color:rgba(255,255,255,.4);margin-top:.3rem;}
+
+/* stats card */
+#stats-section{justify-content:flex-end;padding-right:8vw;}
+.stats-card{background:rgba(255,255,255,.03);border:1px solid rgba(0,212,255,.15);border-radius:16px;padding:2.5rem;backdrop-filter:blur(20px);max-width:340px;pointer-events:auto;}
+.stats-card h2{font-family:'Orbitron',monospace;font-size:.7rem;letter-spacing:.3em;color:var(--cyan);margin-bottom:2rem;}
+.stat-row{display:flex;justify-content:space-between;align-items:baseline;padding:.8rem 0;border-bottom:1px solid rgba(255,255,255,.05);}
+.stat-row:last-child{border-bottom:none;}
+.stat-label{font-size:.8rem;color:rgba(255,255,255,.4);font-weight:300;}
+.stat-value{font-family:'Orbitron',monospace;font-size:1.1rem;font-weight:700;}
+
+/* info */
+#info-section{justify-content:flex-start;padding-left:8vw;}
+.info-card{max-width:420px;pointer-events:auto;}
+.info-card .section-tag{font-family:'Orbitron',monospace;font-size:.6rem;letter-spacing:.4em;color:var(--aurora);text-transform:uppercase;margin-bottom:1.5rem;}
+.info-card h2{font-size:clamp(1.8rem,4vw,3rem);font-weight:700;line-height:1.1;margin-bottom:1.2rem;}
+.info-card p{font-size:.95rem;color:rgba(255,255,255,.45);line-height:1.8;font-weight:300;}
+
+/* final */
+#final-section{flex-direction:column;text-align:center;}
+#final-section h2{font-family:'Orbitron',monospace;font-size:clamp(1.5rem,5vw,4rem);font-weight:900;background:linear-gradient(135deg,var(--aurora),var(--cyan));-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;margin-bottom:1rem;}
+#final-section p{font-size:.9rem;color:rgba(255,255,255,.3);letter-spacing:.1em;}
+
+/* satellite label */
+.sat-label{position:fixed;font-family:'Orbitron',monospace;font-size:.55rem;letter-spacing:.2em;color:rgba(0,212,255,.7);pointer-events:none;z-index:18;text-shadow:0 0 10px var(--cyan);}
+
+@keyframes fadeUp{from{opacity:0;transform:translateY(30px);}to{opacity:1;transform:translateY(0);}}
+@keyframes scrollPulse{0%,100%{opacity:.3;}50%{opacity:1;}}
+</style>
+</head>
+<body>
+
+<div id="cursor"></div>
+<div id="cursor-ring"></div>
+<div id="scanlines"></div>
+<canvas id="particle-canvas"></canvas>
+<canvas id="exp-canvas"></canvas>
+
+<div id="canvas-container"><canvas id="three-canvas"></canvas></div>
+
+<div id="click-hint">CLICK EARTH TO ZOOM &amp; EXPLORE</div>
+<div id="zoom-close" onclick="exitZoom()">✕ EXIT ZOOM</div>
+<div id="zoom-region-label"></div>
+<div id="fact-popup"><div class="fact-tag">EARTH FACT</div><div class="fact-text" id="fact-text"></div><div class="fact-source" id="fact-source"></div></div>
+
+<div id="scroll-container">
+  <section class="section" id="hero">
+    <div class="eyebrow">Third rock from the sun · 4.5 billion years old</div>
+    <h1 class="main">EARTH</h1>
+    <p class="subtitle">Click to zoom · Scroll to explore · Watch the skies</p>
+    <div class="scroll-hint"><span>scroll</span><div class="scroll-line"></div></div>
+  </section>
+  <section class="section" id="stats-section">
+    <div class="stats-card">
+      <h2>PLANETARY DATA</h2>
+      <div class="stat-row"><span class="stat-label">Diameter</span><span class="stat-value">12,742 km</span></div>
+      <div class="stat-row"><span class="stat-label">Orbital Speed</span><span class="stat-value">29.78 km/s</span></div>
+      <div class="stat-row"><span class="stat-label">Surface Area</span><span class="stat-value">510M km²</span></div>
+      <div class="stat-row"><span class="stat-label">Distance from Sun</span><span class="stat-value">1 AU</span></div>
+      <div class="stat-row"><span class="stat-label">Satellites</span><span class="stat-value">1 Moon + ISS</span></div>
+      <div class="stat-row"><span class="stat-label">Axial Tilt</span><span class="stat-value">23.5°</span></div>
+    </div>
+  </section>
+  <section class="section" id="info-section">
+    <div class="info-card">
+      <div class="section-tag">The Blue Marble</div>
+      <h2>Only known harbor of life</h2>
+      <p>Earth's magnetic field, liquid water, and precise axial tilt create conditions found nowhere else in the observable universe — a cosmic accident, or something more.</p>
+    </div>
+  </section>
+  <section class="section" id="final-section">
+    <h2>ONE PALE BLUE DOT</h2>
+    <p>— Carl Sagan, 1994</p>
+  </section>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+// ─── CURSOR ────────────────────────────────────────────────────
+const cursor=document.getElementById('cursor'),cRing=document.getElementById('cursor-ring');
+let mx=0,my=0,rx=0,ry=0;
+document.addEventListener('mousemove',e=>{mx=e.clientX;my=e.clientY;cursor.style.left=mx+'px';cursor.style.top=my+'px';});
+setInterval(()=>{rx+=(mx-rx)*.1;ry+=(my-ry)*.1;cRing.style.left=rx+'px';cRing.style.top=ry+'px';},16);
+
+// ─── FACTS DB ─────────────────────────────────────────────────
+const FACTS=[
+  {text:"Earth's magnetic north pole moves about 55 km per year — compasses point to a slightly different location every decade.",source:"NOAA Geomagnetic Lab"},
+  {text:"The deepest point on Earth, the Mariana Trench, is 11,034 metres deep — deeper than Everest is tall.",source:"USGS Ocean Survey"},
+  {text:"Lightning strikes Earth approximately 100 times every second — that's 8.6 million bolts per day.",source:"NASA Earth Observatory"},
+  {text:"Earth is the densest planet in the Solar System, with an average density of 5.51 g/cm³.",source:"NASA Planetary Fact Sheet"},
+  {text:"A day on Earth is slowly getting longer — in 1.4 billion years, a day will last 25 hours.",source:"Royal Astronomical Society"},
+  {text:"The Amazon rainforest produces 20% of the world's oxygen and is home to 10% of all species on Earth.",source:"WWF Living Planet Report"},
+  {text:"Earth has a 'second moon' — asteroid 3753 Cruithne co-orbits the Sun in a horseshoe pattern relative to Earth.",source:"Nature Astronomy"},
+  {text:"Oceans cover 71% of Earth's surface but only 20% has been mapped in high resolution.",source:"NOAA Ocean Service"},
+  {text:"The ISS travels at 7.66 km/s and orbits Earth every 92 minutes — astronauts see 16 sunrises per day.",source:"NASA ISS Program"},
+  {text:"Earth's inner core rotates slightly faster than the rest of the planet — one extra rotation every 400 years.",source:"Science Journal, 2005"},
+  {text:"Mount Everest is not the tallest mountain from Earth's center. That's Chimborazo, Ecuador, due to Earth's equatorial bulge.",source:"National Geographic"},
+  {text:"The Great Barrier Reef is the largest living structure on Earth — visible from space, spanning 2,300 km.",source:"GBRMPA Annual Report"},
+];
+
+// ─── REGIONS (for zoom click) ─────────────────────────────────
+const REGIONS=[
+  {name:"PACIFIC OCEAN",sub:"71% of ocean surface · avg depth 4,280m",color:0x0033aa},
+  {name:"AMAZON BASIN",sub:"5.5M km² · 390 billion trees",color:0x005500},
+  {name:"HIMALAYAS",sub:"8,849m peak · 5 nations border",color:0x886644},
+  {name:"SAHARA DESERT",sub:"9.2M km² · 25% of Africa",color:0xaa7733},
+  {name:"ANTARCTIC ICE",sub:"26.5M km³ of ice · -89.2°C record",color:0xaaddff},
+  {name:"NORTHERN LIGHTS",sub:"Aurora Borealis · 90–200km altitude",color:0x00ff88},
+  {name:"MARIANA TRENCH",sub:"11,034m deep · Hadal zone",color:0x000066},
+  {name:"AMAZON REEF",sub:"Discovered 2016 · 9,500 km² area",color:0x004433},
+];
+
+// ─── THREE.JS ─────────────────────────────────────────────────
+const threeCanvas=document.getElementById('three-canvas');
+const renderer=new THREE.WebGLRenderer({canvas:threeCanvas,antialias:true,alpha:true});
+renderer.setPixelRatio(Math.min(window.devicePixelRatio,2));
+renderer.setSize(window.innerWidth,window.innerHeight);
+renderer.setClearColor(0x00000f,1);
+renderer.shadowMap.enabled=true;
+
+const scene=new THREE.Scene();
+const camera=new THREE.PerspectiveCamera(55,window.innerWidth/window.innerHeight,0.1,1000);
+camera.position.z=3;
+
+// Stars
+const sGeo=new THREE.BufferGeometry();
+const sCount=10000;
+const sPos=new Float32Array(sCount*3);
+const sSizes=new Float32Array(sCount);
+for(let i=0;i<sCount;i++){sPos[i*3]=(Math.random()-.5)*300;sPos[i*3+1]=(Math.random()-.5)*300;sPos[i*3+2]=(Math.random()-.5)*300;sSizes[i]=Math.random()*.08+.02;}
+sGeo.setAttribute('position',new THREE.BufferAttribute(sPos,3));
+sGeo.setAttribute('size',new THREE.BufferAttribute(sSizes,1));
+const sMat=new THREE.PointsMaterial({color:0xffffff,size:.06,transparent:true,opacity:.9,sizeAttenuation:true});
+scene.add(new THREE.Points(sGeo,sMat));
+
+// ─── REAL EARTH TEXTURE (NASA Blue Marble via public CDN) ──────
+const loader=new THREE.TextureLoader();
+const earthGroup=new THREE.Group();
+scene.add(earthGroup);
+
+// Procedural high-quality texture as fallback + enhancement
+function makeEarthTexture(){
+  const tc=document.createElement('canvas');
+  tc.width=2048;tc.height=1024;
+  const c=tc.getContext('2d');
+
+  // Deep ocean gradient
+  const og=c.createLinearGradient(0,0,0,1024);
+  og.addColorStop(0,'#000d2e');og.addColorStop(.25,'#001e55');og.addColorStop(.5,'#00276e');og.addColorStop(.75,'#001e55');og.addColorStop(1,'#000d2e');
+  c.fillStyle=og;c.fillRect(0,0,2048,1024);
+
+  // Ocean depth variation
+  c.globalAlpha=.3;
+  for(let i=0;i<80;i++){
+    const g=c.createRadialGradient(Math.random()*2048,Math.random()*1024,0,Math.random()*2048,Math.random()*1024,Math.random()*200+50);
+    g.addColorStop(0,'rgba(0,60,140,.6)');g.addColorStop(1,'transparent');
+    c.fillStyle=g;c.fillRect(0,0,2048,1024);
+  }
+  c.globalAlpha=1;
+
+  // Land masses — realistic shapes
+  const lands=[
+    // North America
+    {pts:[[320,160],[380,170],[430,200],[450,250],[420,300],[390,340],[360,360],[310,340],[280,300],[260,250],[270,200],[300,170]],c:'#2d6e1e'},
+    // South America
+    {pts:[[380,360],[420,370],[450,410],[460,480],[440,560],[400,620],[360,640],[330,600],[320,530],[330,450],[350,400],[370,370]],c:'#1e5e15'},
+    // Europe
+    {pts:[[490,120],[550,110],[610,120],[640,160],[620,190],[580,200],[540,195],[500,180],[480,155],[485,130]],c:'#3a7a28'},
+    // Africa
+    {pts:[[520,220],[590,210],[640,240],[670,300],[680,380],[650,460],[600,510],[550,530],[500,510],[470,450],[460,370],[470,290],[490,240]],c:'#2a6b1a'},
+    // Asia main
+    {pts:[[610,120],[750,100],[900,110],[980,150],[1010,200],[990,260],[950,290],[880,300],[800,280],[720,260],[660,240],[620,210],[600,170],[605,140]],c:'#3d8030'},
+    // South Asia
+    {pts:[[780,280],[840,275],[880,295],[890,340],[870,380],[830,400],[790,390],[760,360],[755,320],[765,290]],c:'#338025'},
+    // Southeast Asia
+    {pts:[[870,290],[930,280],[960,310],[950,360],[920,380],[880,370],[855,340],[850,310]],c:'#2d7020'},
+    // Australia
+    {pts:[[900,430],[970,420],[1020,440],[1050,480],[1040,530],[1000,560],[950,560],[900,530],[880,490],[885,455]],c:'#5a7a25'},
+    // Greenland
+    {pts:[[330,80],[390,75],[420,95],[410,130],[380,150],[340,145],[310,125],[315,95]],c:'#c8e8ff'},
+    // Antarctica
+    {pts:[[0,940],[2048,940],[2048,1024],[0,1024]],c:'#ddeeff'},
+    {pts:[[0,940],[100,920],[300,900],[600,890],[1024,885],[1400,890],[1700,900],[1900,920],[2048,940],[2048,960],[0,960]],c:'#eef5ff'},
+    // Japan
+    {pts:[[980,185],[1000,180],[1015,195],[1010,215],[990,220],[975,210],[972,195]],c:'#3a8028'},
+    // UK
+    {pts:[[490,135],[505,128],[515,140],[510,158],[495,162],[482,150],[483,140]],c:'#3d7525'},
+    // Madagascar
+    {pts:[[625,440],[645,435],[660,455],[655,490],[635,510],[615,500],[610,475],[612,450]],c:'#2a6520'},
+    // New Zealand
+    {pts:[[1030,560],[1045,550],[1058,565],[1055,585],[1038,592],[1025,580],[1022,565]],c:'#347825'},
+  ];
+
+  lands.forEach(land=>{
+    if(!land.pts||land.pts.length<3)return;
+    c.beginPath();c.moveTo(land.pts[0][0],land.pts[0][1]);
+    land.pts.forEach(p=>c.lineTo(p[0],p[1]));
+    c.closePath();c.fillStyle=land.c;c.fill();
+    // land detail shading
+    c.fillStyle='rgba(0,0,0,.15)';c.fill();
+  });
+
+  // Mountain ranges — darker areas on land
+  c.globalAlpha=.3;
+  [[460,200,60,20,'#1a3a10'],[700,180,100,25,'#1a3a10'],[790,295,40,12,'#1a4010'],[430,250,25,8,'#1a3a10']].forEach(([x,y,w,h,col])=>{
+    c.fillStyle=col;c.beginPath();c.ellipse(x,y,w,h,0,0,Math.PI*2);c.fill();
+  });
+  c.globalAlpha=1;
+
+  // Coastline glow (shallow water)
+  c.globalCompositeOperation='source-over';
+  lands.forEach(land=>{
+    if(!land.pts||land.pts.length<3||land.c.includes('ff'))return;
+    c.beginPath();c.moveTo(land.pts[0][0],land.pts[0][1]);
+    land.pts.forEach(p=>c.lineTo(p[0],p[1]));
+    c.closePath();
+    c.strokeStyle='rgba(0,150,255,.25)';c.lineWidth=6;c.stroke();
+  });
+
+  // Cloud layer
+  c.globalAlpha=1;
+  for(let i=0;i<120;i++){
+    const cx=Math.random()*2048,cy=Math.random()*1024;
+    const rw=Math.random()*180+40,rh=Math.random()*25+8;
+    const cg=c.createRadialGradient(cx,cy,0,cx,cy,rw);
+    cg.addColorStop(0,'rgba(255,255,255,.18)');cg.addColorStop(.5,'rgba(255,255,255,.10)');cg.addColorStop(1,'transparent');
+    c.fillStyle=cg;c.beginPath();c.ellipse(cx,cy,rw,rh,Math.random()*Math.PI,0,Math.PI*2);c.fill();
+  }
+  // Cyclone swirls
+  [[600,350],[300,400],[1400,300]].forEach(([cx,cy])=>{
+    c.strokeStyle='rgba(255,255,255,.12)';c.lineWidth=8;
+    for(let r=10;r<60;r+=15){c.beginPath();c.arc(cx,cy,r,0,Math.PI*.8);c.stroke();}
+  });
+
+  // Polar ice caps glow
+  const northG=c.createLinearGradient(0,0,0,80);
+  northG.addColorStop(0,'rgba(220,240,255,.8)');northG.addColorStop(1,'transparent');
+  c.fillStyle=northG;c.fillRect(0,0,2048,80);
+  const southG=c.createLinearGradient(0,944,0,1024);
+  southG.addColorStop(0,'transparent');southG.addColorStop(1,'rgba(220,240,255,.9)');
+  c.fillStyle=southG;c.fillRect(0,944,2048,80);
+
+  // Ocean sparkle
+  c.globalAlpha=.06;
+  for(let i=0;i<300;i++){
+    c.fillStyle='rgba(100,200,255,1)';
+    c.beginPath();c.arc(Math.random()*2048,Math.random()*1024,Math.random()*3+.5,0,Math.PI*2);c.fill();
+  }
+  c.globalAlpha=1;
+
+  return new THREE.CanvasTexture(tc);
+}
+
+// Night texture (city lights)
+function makeNightTexture(){
+  const tc=document.createElement('canvas');tc.width=1024;tc.height=512;
+  const c=tc.getContext('2d');
+  c.fillStyle='#000005';c.fillRect(0,0,1024,512);
+  // City light clusters
+  const cities=[[320,190],[490,145],[520,155],[540,160],[610,170],[650,180],[700,185],[750,185],[980,200],[310,250],[380,260],[850,290],[900,310],[430,310],[460,430],[950,435]];
+  cities.forEach(([x,y])=>{
+    for(let i=0;i<60;i++){
+      const px=x+(Math.random()-.5)*50,py=y+(Math.random()-.5)*25;
+      const g=c.createRadialGradient(px,py,0,px,py,Math.random()*4+1);
+      const col=Math.random()>0.6?'255,220,100':'255,180,80';
+      g.addColorStop(0,`rgba(${col},.9)`);g.addColorStop(1,'transparent');
+      c.fillStyle=g;c.beginPath();c.arc(px,py,Math.random()*3+.5,0,Math.PI*2);c.fill();
+    }
+  });
+  return new THREE.CanvasTexture(tc);
+}
+
+const earthTex=makeEarthTexture();
+const nightTex=makeNightTexture();
+
+// Specular map — oceans shiny, land matte
+function makeSpecularMap(){
+  const tc=document.createElement('canvas');tc.width=1024;tc.height=512;
+  const c=tc.getContext('2d');
+  c.fillStyle='#334455';c.fillRect(0,0,1024,512);// ocean = some specular
+  // land = dark (matte)
+  c.fillStyle='#111111';
+  [[160,80,230,140],[245,55,320,90],[370,180,540,320],[500,110,640,200],[300,75,415,100],[540,50,995,250],[780,140,940,200],[450,215,475,260],[900,215,980,280],[940,280],[610,210,680,255]].forEach(r=>{
+    if(r.length===4)c.fillRect(r[0]/2,r[1]/2,r[2]/2,r[3]/2);
+  });
+  return new THREE.CanvasTexture(tc);
+}
+
+const earthGeo=new THREE.SphereGeometry(1,128,64);
+const earthMat=new THREE.MeshPhongMaterial({
+  map:earthTex,
+  specularMap:makeSpecularMap(),
+  specular:new THREE.Color(0x224466),
+  shininess:35,
+  emissiveMap:nightTex,
+  emissive:new THREE.Color(0xffaa44),
+  emissiveIntensity:.0,
+});
+const earth=new THREE.Mesh(earthGeo,earthMat);
+earth.castShadow=true;
+earthGroup.add(earth);
+
+// Atmosphere
+const atmosGeo=new THREE.SphereGeometry(1.03,64,64);
+const atmosMat=new THREE.MeshPhongMaterial({color:0x0088dd,transparent:true,opacity:.10,side:THREE.FrontSide,depthWrite:false});
+const atmosphere=new THREE.Mesh(atmosGeo,atmosMat);
+earthGroup.add(atmosphere);
+
+// Outer atmosphere rim
+const rimGeo=new THREE.SphereGeometry(1.1,64,64);
+const rimMat=new THREE.MeshBasicMaterial({color:0x0044bb,transparent:true,opacity:.04,side:THREE.BackSide,depthWrite:false});
+earthGroup.add(new THREE.Mesh(rimGeo,rimMat));
+
+// Cloud layer (separate slow rotation)
+const cloudGeo=new THREE.SphereGeometry(1.015,64,64);
+function makeCloudTexture(){
+  const tc=document.createElement('canvas');tc.width=1024;tc.height=512;
+  const c=tc.getContext('2d');
+  c.fillStyle='transparent';c.clearRect(0,0,1024,512);
+  for(let i=0;i<100;i++){
+    const cx=Math.random()*1024,cy=Math.random()*512,rw=Math.random()*150+30,rh=Math.random()*22+6;
+    const g=c.createRadialGradient(cx,cy,0,cx,cy,rw);
+    g.addColorStop(0,'rgba(255,255,255,.22)');g.addColorStop(.6,'rgba(255,255,255,.08)');g.addColorStop(1,'transparent');
+    c.fillStyle=g;c.beginPath();c.ellipse(cx,cy,rw,rh,Math.random()*Math.PI,0,Math.PI*2);c.fill();
+  }
+  return new THREE.CanvasTexture(tc);
+}
+const cloudMat=new THREE.MeshPhongMaterial({map:makeCloudTexture(),transparent:true,opacity:.55,depthWrite:false});
+const clouds=new THREE.Mesh(cloudGeo,cloudMat);
+earthGroup.add(clouds);
+
+// Orbit rings
+const ringMat=new THREE.MeshBasicMaterial({color:0x00d4ff,transparent:true,opacity:0,wireframe:false});
+const orbitRing=new THREE.Mesh(new THREE.TorusGeometry(1.65,.003,2,140),ringMat);
+orbitRing.rotation.x=Math.PI/2.5;
+scene.add(orbitRing);
+const ring2Mat=new THREE.MeshBasicMaterial({color:0x7b2fff,transparent:true,opacity:0});
+const orbitRing2=new THREE.Mesh(new THREE.TorusGeometry(2.1,.002,2,140),ring2Mat);
+orbitRing2.rotation.x=Math.PI/3;orbitRing2.rotation.z=.4;
+scene.add(orbitRing2);
+
+// Moon
+const moonGeo=new THREE.SphereGeometry(.12,32,32);
+function makeMoonTex(){
+  const tc=document.createElement('canvas');tc.width=256;tc.height=256;
+  const c=tc.getContext('2d');
+  c.fillStyle='#8888aa';c.fillRect(0,0,256,256);
+  for(let i=0;i<30;i++){
+    c.fillStyle=`rgba(0,0,0,${Math.random()*.3+.1})`;
+    c.beginPath();c.arc(Math.random()*256,Math.random()*256,Math.random()*12+2,0,Math.PI*2);c.fill();
+  }
+  return new THREE.CanvasTexture(tc);
+}
+const moonMat=new THREE.MeshPhongMaterial({map:makeMoonTex(),shininess:3});
+const moon=new THREE.Mesh(moonGeo,moonMat);
+scene.add(moon);
+
+// ─── ISS / SATELLITE ──────────────────────────────────────────
+const issGeo=new THREE.BufferGeometry();
+// ISS shape: central module + solar panels
+const issVerts=new Float32Array([
+  // body
+  0,0,0, .08,0,0,
+  // panels horizontal
+  -.05,.003,0, .05,.003,0,
+  0,.003,-.05, 0,.003,.05,
+]);
+issGeo.setAttribute('position',new THREE.BufferAttribute(issVerts,3));
+const issMat=new THREE.LineBasicMaterial({color:0xffffff,linewidth:2});
+const issObj=new THREE.LineSegments(issGeo,issMat);
+issObj.scale.set(2,2,2);
+scene.add(issObj);
+
+// ISS glow dot
+const issGlowGeo=new THREE.SphereGeometry(.015,8,8);
+const issGlowMat=new THREE.MeshBasicMaterial({color:0xffffff,transparent:true,opacity:.9});
+const issGlow=new THREE.Mesh(issGlowGeo,issGlowMat);
+scene.add(issGlow);
+
+// Satellite label
+const satLabel=document.createElement('div');
+satLabel.className='sat-label';
+satLabel.innerHTML='ISS ◈';
+document.body.appendChild(satLabel);
+
+// Lights
+const ambLight=new THREE.AmbientLight(0x112244,.5);
+scene.add(ambLight);
+const sunLight=new THREE.DirectionalLight(0xffffff,1.5);
+sunLight.position.set(5,3,5);
+sunLight.castShadow=true;
+scene.add(sunLight);
+const rimLight=new THREE.DirectionalLight(0x0044ff,.35);
+rimLight.position.set(-5,-2,-3);
+scene.add(rimLight);
+const fillLight=new THREE.DirectionalLight(0x001133,.2);
+fillLight.position.set(0,5,-5);
+scene.add(fillLight);
+
+// ─── STATE ────────────────────────────────────────────────────
+let scrollY=0,targetSY=0,lastTrigger=0;
+let isZoomed=false,zoomTarget=3,zoomCurrent=3;
+let mX3D=0,mY3D=0,time=0;
+let factTimer=null;
+
+window.addEventListener('scroll',()=>{
+  scrollY=window.scrollY;
+  if(Math.abs(scrollY-lastTrigger)>160){lastTrigger=scrollY;triggerRandomEvent();}
+});
+
+// show click hint after 2s
+setTimeout(()=>document.getElementById('click-hint').classList.add('show'),2000);
+
+// ─── ZOOM ON CLICK ────────────────────────────────────────────
+function projectToScreen(pos){
+  const v=pos.clone().project(camera);
+  return {x:(v.x+1)/2*window.innerWidth,y:(-v.y+1)/2*window.innerHeight,z:v.z};
+}
+
+threeCanvas.addEventListener('click',e=>{
+  if(isZoomed){exitZoom();return;}
+  // raycasting
+  const raycaster=new THREE.Raycaster();
+  const mouse=new THREE.Vector2((e.clientX/window.innerWidth)*2-1,-(e.clientY/window.innerHeight)*2+1);
+  raycaster.setFromCamera(mouse,camera);
+  const hits=raycaster.intersectObject(earth);
+  if(hits.length>0){
+    enterZoom(hits[0].point);
+    spawnExplosion(e.clientX,e.clientY,'#00d4ff');
+  }
+});
+
+function enterZoom(hitPoint){
+  isZoomed=true;
+  document.body.classList.add('zooming');
+  zoomTarget=1.4;
+  document.getElementById('click-hint').classList.remove('show');
+  document.getElementById('zoom-close').classList.add('show');
+  const region=REGIONS[Math.floor(Math.random()*REGIONS.length)];
+  const rl=document.getElementById('zoom-region-label');
+  rl.innerHTML=`<div style="font-size:.55rem;letter-spacing:.4em;color:rgba(0,212,255,.6);margin-bottom:.3rem">ZOOMING IN</div><div style="font-size:1rem">${region.name}</div><div style="font-size:.55rem;letter-spacing:.2em;color:rgba(255,255,255,.4);margin-top:.3rem">${region.sub}</div>`;
+  rl.classList.add('show');
+  earthMat.emissiveIntensity=.15;
+  atmosMat.opacity=.18;
+  showRandomFact();
+  setTimeout(()=>{rl.classList.remove('show');},3500);
+}
+
+function exitZoom(){
+  isZoomed=false;
+  document.body.classList.remove('zooming');
+  zoomTarget=3;
+  document.getElementById('zoom-close').classList.remove('show');
+  document.getElementById('zoom-region-label').classList.remove('show');
+  earthMat.emissiveIntensity=.0;
+  atmosMat.opacity=.10;
+  hideFact();
+  setTimeout(()=>document.getElementById('click-hint').classList.add('show'),2000);
+}
+
+function showRandomFact(){
+  const f=FACTS[Math.floor(Math.random()*FACTS.length)];
+  document.getElementById('fact-text').textContent=f.text;
+  document.getElementById('fact-source').textContent='Source: '+f.source;
+  document.getElementById('fact-popup').classList.add('show');
+  if(factTimer)clearTimeout(factTimer);
+  factTimer=setTimeout(hideFact,6000);
+}
+
+function hideFact(){
+  document.getElementById('fact-popup').classList.remove('show');
+}
+
+// ─── EXPLOSION CANVAS ─────────────────────────────────────────
+const eCanvas=document.getElementById('exp-canvas');
+eCanvas.width=window.innerWidth;eCanvas.height=window.innerHeight;
+const eCtx=eCanvas.getContext('2d');
+const expParticles=[];
+
+function spawnExplosion(x,y,col='#00d4ff'){
+  const count=Math.random()>0.5?80:50;
+  for(let i=0;i<count;i++){
+    const angle=Math.random()*Math.PI*2;
+    const speed=Math.random()*6+2;
+    expParticles.push({
+      x,y,vx:Math.cos(angle)*speed,vy:Math.sin(angle)*speed,
+      r:Math.random()*4+1,life:1,
+      decay:Math.random()*.025+.015,
+      col:Math.random()>0.3?col:(Math.random()>0.5?'#ffffff':'#7b2fff'),
+      gravity:Math.random()*.15
+    });
+  }
+  // ring wave
+  expParticles.push({ring:true,x,y,r:5,maxR:120,life:1,decay:.025,col});
+}
+
+function animExp(){
+  eCtx.clearRect(0,0,eCanvas.width,eCanvas.height);
+  for(let i=expParticles.length-1;i>=0;i--){
+    const p=expParticles[i];
+    if(p.ring){
+      eCtx.beginPath();eCtx.arc(p.x,p.y,p.r,0,Math.PI*2);
+      eCtx.strokeStyle=p.col.replace(')',`,${p.life})`).replace('rgb','rgba').replace('#','rgba(').replace('rgba(00','rgba(0,0,').replace('rgba(7b','rgba(123,').replace('#00d4ff',`rgba(0,212,255,${p.life})`).replace('#ffffff',`rgba(255,255,255,${p.life})`).replace('#7b2fff',`rgba(123,47,255,${p.life})`);
+      eCtx.strokeStyle=`rgba(0,212,255,${p.life*0.8})`;
+      eCtx.lineWidth=2;eCtx.stroke();
+      p.r+=6;p.life-=p.decay;
+      if(p.life<=0||p.r>p.maxR)expParticles.splice(i,1);
+    } else {
+      p.x+=p.vx;p.y+=p.vy;p.vy+=p.gravity;p.life-=p.decay;
+      const hex=p.col==='#ffffff'?'255,255,255':p.col==='#7b2fff'?'123,47,255':'0,212,255';
+      eCtx.beginPath();eCtx.arc(p.x,p.y,p.r*p.life,0,Math.PI*2);
+      eCtx.fillStyle=`rgba(${hex},${p.life*0.8})`;eCtx.fill();
+      if(p.life<=0)expParticles.splice(i,1);
+    }
+  }
+  requestAnimationFrame(animExp);
+}
+animExp();
+
+// ─── RANDOM SCROLL EVENTS ─────────────────────────────────────
+const EVT_POS=['top-left','top-right','bottom-left','bottom-right'];
+function showLabel(title,sub){
+  document.querySelectorAll('.event-label').forEach(el=>el.remove());
+  const pos=EVT_POS[Math.floor(Math.random()*EVT_POS.length)];
+  const el=document.createElement('div');
+  el.className=`event-label ${pos}`;
+  el.innerHTML=`<div class="label-title">${title}</div><div class="label-sub">${sub}</div>`;
+  document.body.appendChild(el);
+  setTimeout(()=>el.style.opacity='1',50);
+  setTimeout(()=>{el.style.opacity='0';setTimeout(()=>el.remove(),600);},3500);
+}
+
+const SCROLL_EVENTS=[
+  ()=>{showLabel('AURORA BOREALIS','Geomagnetic storm · Kp index 8');atmosMat.color.setHex(0x00ff88);atmosMat.opacity=.22;rimLight.color.setHex(0x00ff44);setTimeout(()=>{atmosMat.color.setHex(0x0088dd);atmosMat.opacity=.10;rimLight.color.setHex(0x0044ff);},2800);},
+  ()=>{showLabel('METEOR SHOWER','47P/Ashbrook-Jackson · 1,247 particles');for(let i=0;i<40;i++)setTimeout(spawnMeteor,i*50);},
+  ()=>{showLabel('SOLAR FLARE','X2.8 class CME · impact in 18h');sunLight.color.setHex(0xff8800);let t=0;const fi=setInterval(()=>{t+=.03;sunLight.intensity=1.5+Math.sin(t*8)*1.2;atmosMat.color.setHex(0xff4400);if(t>2){clearInterval(fi);sunLight.color.setHex(0xffffff);sunLight.intensity=1.5;atmosMat.color.setHex(0x0088dd);}},30);},
+  ()=>{showLabel('MAGNETIC PULSE','Pole drift · +55km this cycle');ringMat.opacity=.9;ring2Mat.opacity=.7;let t=0;const ri=setInterval(()=>{t+=.018;ringMat.opacity=Math.max(0,.9-t);ring2Mat.opacity=Math.max(0,.7-t*.8);if(t>=1)clearInterval(ri);},16);},
+  ()=>{showLabel('HURRICANE EYE','Category 5 · 285 km/h winds');let t=0;const hi=setInterval(()=>{t+=.015;earth.rotation.y+=.06;atmosMat.color.setHex(0x0066aa);if(t>1.5){clearInterval(hi);atmosMat.color.setHex(0x0088dd);}},16);},
+  ()=>{showLabel('VOLCANIC ERUPTION','Kilauea · Hawaii · active vent');sunLight.color.setHex(0xff3300);let t=0;const vi=setInterval(()=>{t+=.04;sunLight.intensity=1.5+Math.sin(t*5)*.8;if(t>2){clearInterval(vi);sunLight.color.setHex(0xffffff);sunLight.intensity=1.5;}},16);spawnExplosion(window.innerWidth/2,window.innerHeight/2,'#ff4400');},
+  ()=>{showLabel('DEEP SEA PING','Signal from Mariana Trench · 11km');earthMat.color.setHex(0x0022aa);rimLight.intensity=1.8;rimLight.color.setHex(0x0088ff);setTimeout(()=>{earthMat.color.setHex(0xffffff);rimLight.intensity=.35;rimLight.color.setHex(0x0044ff);},2500);},
+  ()=>{showLabel('CITY LIGHTS','Night side · 8B humans below');earthMat.emissiveIntensity=.3;let t=0;const ni=setInterval(()=>{t+=.02;if(t>1.5){clearInterval(ni);earthMat.emissiveIntensity=isZoomed?.15:.0;}},16);},
+];
+
+function triggerRandomEvent(){
+  SCROLL_EVENTS[Math.floor(Math.random()*SCROLL_EVENTS.length)]();
+  if(Math.random()>.5)showRandomFact();
+}
+
+function spawnMeteor(){
+  const geo=new THREE.BufferGeometry();
+  const s=new THREE.Vector3((Math.random()-.5)*8,(Math.random()-.5)*5+3,(Math.random()-.5)*4);
+  const d=new THREE.Vector3(-.6-Math.random()*.4,-.9-Math.random()*.3,-.2).normalize().multiplyScalar(2.5);
+  const e2=s.clone().add(d);
+  geo.setAttribute('position',new THREE.BufferAttribute(new Float32Array([s.x,s.y,s.z,e2.x,e2.y,e2.z]),3));
+  const mat=new THREE.LineBasicMaterial({color:0xffffff,transparent:true,opacity:.95});
+  const line=new THREE.Line(geo,mat);
+  scene.add(line);
+  let t=0;const sp=.04+Math.random()*.03;
+  const ti=setInterval(()=>{t+=sp;line.position.x-=sp*.7;line.position.y-=sp;mat.opacity-=.035;if(t>1||mat.opacity<=0){clearInterval(ti);scene.remove(line);}},16);
+}
+
+// ─── PARTICLE CANVAS ──────────────────────────────────────────
+const pCanvas=document.getElementById('particle-canvas');
+pCanvas.width=window.innerWidth;pCanvas.height=window.innerHeight;
+const pCtx=pCanvas.getContext('2d');
+const parts=[];
+class P{constructor(){this.reset();}reset(){this.x=Math.random()*pCanvas.width;this.y=Math.random()*pCanvas.height;this.r=Math.random()*1.2+.3;this.vx=(Math.random()-.5)*.12;this.vy=-Math.random()*.35-.08;this.life=1;this.decay=Math.random()*.003+.0008;this.col=Math.random()>.5?'0,212,255':'123,47,255';}update(){this.x+=this.vx;this.y+=this.vy;this.life-=this.decay;if(this.life<=0||this.y<0)this.reset();}draw(){pCtx.beginPath();pCtx.arc(this.x,this.y,this.r,0,Math.PI*2);pCtx.fillStyle=`rgba(${this.col},${this.life*.35})`;pCtx.fill();}}
+for(let i=0;i<100;i++)parts.push(new P());
+function animP(){pCtx.clearRect(0,0,pCanvas.width,pCanvas.height);parts.forEach(p=>{p.update();p.draw();});requestAnimationFrame(animP);}
+animP();
+
+// ─── MAIN LOOP ────────────────────────────────────────────────
+document.addEventListener('mousemove',e=>{mX3D=(e.clientX/window.innerWidth-.5)*.5;mY3D=(e.clientY/window.innerHeight-.5)*.25;});
+
+function animate(){
+  requestAnimationFrame(animate);
+  time+=.005;
+  targetSY+=(scrollY-targetSY)*.08;
+  const prog=targetSY/Math.max(1,document.body.scrollHeight-window.innerHeight);
+
+  // Earth rotation
+  earth.rotation.y+=.0012;
+  clouds.rotation.y+=.0018;// clouds move faster
+  atmosphere.rotation.y-=.0004;
+
+  // Zoom interpolation
+  zoomCurrent+=(zoomTarget-zoomCurrent)*.055;
+  camera.position.z=zoomCurrent-prog*.5;
+  camera.position.y=Math.sin(prog*Math.PI)*.4;
+
+  // Mouse parallax
+  earthGroup.rotation.y+=(mX3D*.15-earthGroup.rotation.y)*.04;
+  earthGroup.rotation.x+=(mY3D*.1-earthGroup.rotation.x)*.04;
+
+  // Float
+  earthGroup.position.y=Math.sin(time*.7)*.07;
+
+  // ISS orbit
+  const issAngle=time*.6;
+  const issR=1.42;
+  const issInc=.6;
+  issObj.position.x=Math.cos(issAngle)*issR;
+  issObj.position.y=Math.sin(issAngle)*issR*Math.sin(issInc);
+  issObj.position.z=Math.sin(issAngle)*issR*Math.cos(issInc);
+  issObj.rotation.y=issAngle+Math.PI/2;
+  issGlow.position.copy(issObj.position);
+  issGlowMat.opacity=.7+Math.sin(time*4)*.2;
+
+  // ISS label projected
+  const sp=projectToScreen(issObj.position);
+  if(sp.z<1){
+    satLabel.style.left=(sp.x+12)+'px';
+    satLabel.style.top=(sp.y-8)+'px';
+    satLabel.style.opacity='1';
+  } else {
+    satLabel.style.opacity='0';
+  }
+
+  // Moon orbit
+  moon.position.x=Math.cos(time*.35)*2.4;
+  moon.position.z=Math.sin(time*.35)*2.4;
+  moon.position.y=Math.sin(time*.18)*.35;
+  moon.rotation.y+=.002;
+
+  // Stars
+  scene.children[0].rotation.y+=.00008;
+
+  renderer.render(scene,camera);
+}
+animate();
+
+// ─── RESIZE ───────────────────────────────────────────────────
+window.addEventListener('resize',()=>{
+  camera.aspect=window.innerWidth/window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth,window.innerHeight);
+  pCanvas.width=window.innerWidth;pCanvas.height=window.innerHeight;
+  eCanvas.width=window.innerWidth;eCanvas.height=window.innerHeight;
+});
+</script>
+</body>
+</html>
